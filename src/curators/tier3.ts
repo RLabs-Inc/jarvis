@@ -7,7 +7,13 @@
 //   - tasks.md  — Active tasks and todos
 //   - context.md — Immediate context for next session
 //
-// Uses Haiku for speed and cost efficiency.
+// Uses the same model as the vessel itself (Opus) — these are my memories,
+// I should curate them myself. No delegation to smaller models.
+//
+// For long sessions, the transcript is processed in chunks:
+//   1. Each chunk → running notes (accumulating understanding)
+//   2. Final pass: notes + current files → updated memory files
+//
 // Writes atomically with backup to protect existing state.
 // ---------------------------------------------------------------------------
 
@@ -16,7 +22,12 @@ import { join, dirname } from "node:path";
 import { ClaudeClient } from "../api/client.ts";
 import type { JarvisConfig } from "../config.ts";
 import { loadTranscript } from "../session/transcript.ts";
-import { formatTranscript, buildTier3Prompt, parseCuratorResponse } from "./prompts.ts";
+import {
+  splitTranscriptIntoChunks,
+  buildChunkDigestPrompt,
+  buildTier3Prompt,
+  parseCuratorResponse,
+} from "./prompts.ts";
 import { readTierFile, extractText } from "./helpers.ts";
 
 // ---------------------------------------------------------------------------
@@ -84,15 +95,27 @@ export interface Tier3CurationResult {
   filesUpdated: string[];
   model: string;
   tokenUsage: CuratorTokenUsage;
+  chunks: number;
+}
+
+/**
+ * Accumulate token usage from a response.
+ */
+function addUsage(
+  total: CuratorTokenUsage,
+  response: { usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } },
+): void {
+  total.input += response.usage.input_tokens;
+  total.output += response.usage.output_tokens;
+  total.cacheCreation += response.usage.cache_creation_input_tokens ?? 0;
+  total.cacheRead += response.usage.cache_read_input_tokens ?? 0;
 }
 
 /**
  * Run the Tier 3 curator for a completed session.
  *
- * 1. Load the session transcript
- * 2. Read current Tier 3 files
- * 3. Call Claude (Haiku) with the curation prompt
- * 4. Parse the response and write updated files atomically
+ * For short sessions: single API call with full transcript.
+ * For long sessions: chunk → digest → synthesize pipeline.
  */
 export async function curateTier3(
   config: JarvisConfig,
@@ -101,30 +124,62 @@ export async function curateTier3(
   maxRecentSessions?: number,
 ): Promise<Tier3CurationResult> {
   const maxSessions = maxRecentSessions ?? DEFAULT_MAX_RECENT_SESSIONS;
+  const model = config.curationModel;
+  const tokenUsage: CuratorTokenUsage = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
 
   // Load the session transcript
   const messages = loadTranscript(config.mindDir, sessionId);
   if (messages.length === 0) {
-    return { filesUpdated: [], model: config.curationModel, tokenUsage: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 } };
+    return { filesUpdated: [], model, tokenUsage, chunks: 0 };
   }
 
-  // Format transcript for the curator prompt
-  const transcript = formatTranscript(messages);
+  // Split transcript into chunks
+  const chunks = splitTranscriptIntoChunks(messages);
 
-  // Read current Tier 3 content (via shared helper)
+  // Read current Tier 3 content
   const currentRecent = readTierFile(config.mindDir, 3, "recent.md");
   const currentTasks = readTierFile(config.mindDir, 3, "tasks.md");
   const currentContext = readTierFile(config.mindDir, 3, "context.md");
 
-  // Build the curation prompt
-  const prompt = buildTier3Prompt(transcript, currentRecent, currentTasks, currentContext, maxSessions);
+  let transcriptOrNotes: string;
+  let isFromNotes = false;
 
-  // Call Claude with the curation prompt
+  if (chunks.length <= 1) {
+    // Short session — use transcript directly
+    transcriptOrNotes = chunks[0] ?? "";
+  } else {
+    // Long session — process chunks into running notes
+    let runningNotes = "";
+    for (let i = 0; i < chunks.length; i++) {
+      const prompt = buildChunkDigestPrompt(chunks[i]!, i, chunks.length, runningNotes);
+      const response = await client.call({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        maxTokens: 4096,
+      });
+      addUsage(tokenUsage, response);
+      runningNotes = extractText(response.content);
+    }
+    transcriptOrNotes = runningNotes;
+    isFromNotes = true;
+  }
+
+  // Final pass: build memory files from transcript or notes
+  const prompt = buildTier3Prompt(
+    transcriptOrNotes,
+    currentRecent,
+    currentTasks,
+    currentContext,
+    maxSessions,
+    isFromNotes,
+  );
+
   const response = await client.call({
-    model: config.curationModel,
+    model,
     messages: [{ role: "user", content: prompt }],
     maxTokens: 4096,
   });
+  addUsage(tokenUsage, response);
 
   // Extract text from response
   const responseText = extractText(response.content);
@@ -145,13 +200,8 @@ export async function curateTier3(
 
   return {
     filesUpdated,
-    model: config.curationModel,
-    tokenUsage: {
-      input: response.usage.input_tokens,
-      output: response.usage.output_tokens,
-      cacheCreation: response.usage.cache_creation_input_tokens ?? 0,
-      cacheRead: response.usage.cache_read_input_tokens ?? 0,
-    },
+    model,
+    tokenUsage,
+    chunks: chunks.length,
   };
 }
-

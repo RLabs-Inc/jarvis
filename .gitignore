@@ -44,3 +44,6 @@ bun.lock
 
 # Reference docs (large, downloaded on demand)
 docs/references/
+
+# Workshop — personal creative space
+mind/workshop/

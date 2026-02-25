@@ -24,11 +24,13 @@ afterAll(() => {
   }
 });
 
+const TEST_CURATION_MODEL = "claude-opus-4-6";
+
 function makeConfig(overrides: Partial<JarvisConfig> = {}): JarvisConfig {
   return {
     authToken: "test-token",
     model: "claude-opus-4-6",
-    curationModel: "claude-haiku-4-5-20251001",
+    curationModel: TEST_CURATION_MODEL,
     tierBudgets: { tier1: 20000, tier2: 25000, tier3: 15000, tier4: 140000 },
     mindDir: TEST_MIND,
     apiBaseUrl: "https://api.anthropic.com",
@@ -50,7 +52,7 @@ function makeMockClient(responseText: string) {
           type: "message" as const,
           role: "assistant" as const,
           content: [{ type: "text" as const, text: responseText }] as ContentBlock[],
-          model: "claude-sonnet-4-6",
+          model: TEST_CURATION_MODEL,
           stop_reason: "end_turn" as const,
           stop_sequence: null,
           usage: { input_tokens: 200, output_tokens: 150 },
@@ -75,7 +77,7 @@ describe("curateTier2", () => {
     expect(result.tokenUsage.input).toBe(0);
   });
 
-  test("calls API with Sonnet model", async () => {
+  test("calls API with configured curation model", async () => {
     const config = makeConfig();
     const curatorResponse = `<file name="projects.md">
 # Projects
@@ -101,8 +103,8 @@ Jarvis development
     const result = await curateTier2(config, client as never, "sess-t2");
 
     expect(callArgs.length).toBe(1);
-    expect(callArgs[0]!.model).toBe("claude-sonnet-4-6");
-    expect(result.model).toBe("claude-sonnet-4-6");
+    expect(callArgs[0]!.model).toBe(TEST_CURATION_MODEL);
+    expect(result.model).toBe(TEST_CURATION_MODEL);
   });
 
   test("writes updated tier2 files atomically", async () => {
@@ -202,7 +204,7 @@ Should not be written
         type: "message" as const,
         role: "assistant" as const,
         content: [{ type: "text" as const, text: '<file name="focus.md">x</file>' }] as ContentBlock[],
-        model: "claude-sonnet-4-6",
+        model: TEST_CURATION_MODEL,
         stop_reason: "end_turn" as const,
         stop_sequence: null,
         usage: {
@@ -240,7 +242,7 @@ Should not be written
           type: "message" as const,
           role: "assistant" as const,
           content: [{ type: "text" as const, text: '<file name="projects.md">updated</file>' }],
-          model: "claude-sonnet-4-6",
+          model: TEST_CURATION_MODEL,
           stop_reason: "end_turn" as const,
           usage: { input_tokens: 80, output_tokens: 40 },
         };

@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Environment / secrets
+.env
+.env.*
+*.key
+*.pem
+.jarvis/
+
+# Config with secrets (lives in ~/.jarvis/config.json, not in repo)
+config.json
+
+# Mind files — real memories are private, only .example.md files are tracked
+mind/tier1/*.md
+mind/tier2/*.md
+mind/tier2/*.bak
+mind/tier3/*.md
+mind/tier3/*.bak
+!mind/**/*.example.md
+
+# Conversations — personal/ephemeral
+mind/conversations/
+
+# Heartbeat logs — runtime artifacts
+mind/heartbeat/
+
+# Logs — runtime artifacts
+logs/
+
+# Temporary files
+*.tmp
+/tmp/
+
+# Claude Code task files (ephemeral)
+CLAUDE_CODE_TASK.md
+
+# Bun lockfile binary
+bun.lock
+
+# Reference docs (large, downloaded on demand)
+docs/references/

@@ -7,10 +7,11 @@
 // The wake handler:
 //   1. Looks up the task definition
 //   2. Checks rate limits (defer if throttled)
-//   3. Assembles tiered context (Tier 1-3 from files)
-//   4. Adds the task's system prompt
-//   5. Runs a conversation with the task's user message
-//   6. Logs the result to mind/heartbeat/logs/
+//   3. Checks minimum model requirement (defer if would downgrade too far)
+//   4. Assembles tiered context (Tier 1-3 from files)
+//   5. Adds the task's system prompt
+//   6. Runs a conversation with the task's user message
+//   7. Logs the result to mind/heartbeat/logs/
 //
 // This is a one-shot execution — it runs, logs, and exits.
 // It does NOT use the full Daemon class. It's a lightweight pipeline
@@ -25,7 +26,7 @@ import { CORE_TOOLS } from "../tools/definitions.ts";
 import { runConversation } from "../conversation.ts";
 import { getTask } from "./tasks.ts";
 import type { TaskDefinition } from "./tasks.ts";
-import { checkLimits, shouldThrottle, selectModel, recordUsage } from "./rate-limits.ts";
+import { checkLimits, shouldThrottle, selectModel, meetsMinModel, recordUsage } from "./rate-limits.ts";
 import { mkdirSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -52,7 +53,7 @@ export interface WakeResult {
  * Execute an autonomous task triggered by cron.
  *
  * Pipeline:
- *   task lookup → rate limit check → context assembly → conversation → log
+ *   task lookup → rate limit check → min model check → context assembly → conversation → log
  */
 export async function handleWake(
   taskName: string,
@@ -90,12 +91,23 @@ export async function handleWake(
 
     // Downgrade model if needed
     model = selectModel(limits, model);
+
+    // 3. Check minimum model requirement
+    if (!meetsMinModel(model, task.minModel)) {
+      const result = makeResult(taskName, model, logPath, startTime, {
+        success: true,
+        throttled: true,
+        response: `Deferred: would use ${model} but task requires at least ${task.minModel} (5h: ${(limits.fiveHour * 100).toFixed(1)}%, 7d: ${(limits.sevenDay * 100).toFixed(1)}%)`,
+      });
+      writeWakeLog(result);
+      return result;
+    }
   } catch {
     // Rate limit check failed — proceed with preferred model
     // Better to run the task than to skip it because of a usage check error
   }
 
-  // 3. Assemble context + run task
+  // 4. Assemble context + run task
   try {
     const response = await executeTask(task, model, config);
     const result = makeResult(taskName, model, logPath, startTime, {

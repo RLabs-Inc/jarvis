@@ -9,6 +9,7 @@
 // checks utilization. If approaching limits:
 //   - Defer non-urgent cron tasks
 //   - Downgrade model (opus → sonnet → haiku)
+//   - Respect per-task minimum model requirements
 //   - Log a warning for Sherlock
 //
 // Usage history is persisted for pattern awareness over time.
@@ -58,6 +59,16 @@ const MODEL_TIERS: Record<string, string[]> = {
   "claude-opus-4-6": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
   "claude-sonnet-4-6": ["claude-haiku-4-5-20251001"],
   "claude-haiku-4-5-20251001": [],
+};
+
+/**
+ * Model capability ranking. Higher = more capable.
+ * Used to enforce minimum model requirements on tasks.
+ */
+const MODEL_RANK: Record<string, number> = {
+  "claude-haiku-4-5-20251001": 1,
+  "claude-sonnet-4-6": 2,
+  "claude-opus-4-6": 3,
 };
 
 // ---------------------------------------------------------------------------
@@ -131,6 +142,30 @@ export function selectModel(
   return preferred;
 }
 
+/**
+ * Check if a selected model meets or exceeds a minimum model requirement.
+ *
+ * Used by tasks that need a certain quality floor — e.g., daily_reflection
+ * needs at least Sonnet to be meaningful, so it should be deferred rather
+ * than run on Haiku.
+ *
+ * Returns true if:
+ *   - minModel is not specified (no floor)
+ *   - Both models are known and selected >= minModel in capability
+ *   - Either model is unknown (fail open — let it run)
+ */
+export function meetsMinModel(selected: string, minModel?: string): boolean {
+  if (!minModel) return true;
+
+  const selectedRank = MODEL_RANK[selected];
+  const minRank = MODEL_RANK[minModel];
+
+  // If either model is unknown, fail open (don't block)
+  if (selectedRank === undefined || minRank === undefined) return true;
+
+  return selectedRank >= minRank;
+}
+
 // ---------------------------------------------------------------------------
 // Usage History Persistence
 // ---------------------------------------------------------------------------
@@ -182,4 +217,4 @@ export function recordUsage(mindDir: string, status: RateLimitStatus): void {
 // Exported constants for testing
 // ---------------------------------------------------------------------------
 
-export { DEFAULT_THROTTLE_THRESHOLD, MAX_HISTORY_ENTRIES, MODEL_TIERS };
+export { DEFAULT_THROTTLE_THRESHOLD, MAX_HISTORY_ENTRIES, MODEL_TIERS, MODEL_RANK };

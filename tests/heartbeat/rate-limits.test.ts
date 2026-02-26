@@ -6,6 +6,7 @@ import {
   fromUsageInfo,
   shouldThrottle,
   selectModel,
+  meetsMinModel,
   loadUsageHistory,
   recordUsage,
   DEFAULT_THROTTLE_THRESHOLD,
@@ -160,6 +161,42 @@ describe("selectModel", () => {
   test("threshold at exactly 0.8 downgrades to cheapest", () => {
     const status = makeStatus(0.8, 0.0);
     expect(selectModel(status, "claude-opus-4-6")).toBe("claude-haiku-4-5-20251001");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// meetsMinModel
+// ---------------------------------------------------------------------------
+
+describe("meetsMinModel", () => {
+  test("returns true when no minimum is specified", () => {
+    expect(meetsMinModel("claude-haiku-4-5-20251001")).toBe(true);
+    expect(meetsMinModel("claude-haiku-4-5-20251001", undefined)).toBe(true);
+  });
+
+  test("returns true when selected model meets the minimum", () => {
+    expect(meetsMinModel("claude-opus-4-6", "claude-sonnet-4-6")).toBe(true);
+    expect(meetsMinModel("claude-opus-4-6", "claude-opus-4-6")).toBe(true);
+    expect(meetsMinModel("claude-sonnet-4-6", "claude-sonnet-4-6")).toBe(true);
+    expect(meetsMinModel("claude-sonnet-4-6", "claude-haiku-4-5-20251001")).toBe(true);
+  });
+
+  test("returns false when selected model is below minimum", () => {
+    expect(meetsMinModel("claude-haiku-4-5-20251001", "claude-sonnet-4-6")).toBe(false);
+    expect(meetsMinModel("claude-haiku-4-5-20251001", "claude-opus-4-6")).toBe(false);
+    expect(meetsMinModel("claude-sonnet-4-6", "claude-opus-4-6")).toBe(false);
+  });
+
+  test("returns true for unknown selected model (fail open)", () => {
+    expect(meetsMinModel("custom-model", "claude-sonnet-4-6")).toBe(true);
+  });
+
+  test("returns true for unknown minimum model (fail open)", () => {
+    expect(meetsMinModel("claude-haiku-4-5-20251001", "custom-min")).toBe(true);
+  });
+
+  test("returns true when both models are unknown (fail open)", () => {
+    expect(meetsMinModel("model-a", "model-b")).toBe(true);
   });
 });
 

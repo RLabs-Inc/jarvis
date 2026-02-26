@@ -27,6 +27,12 @@ export interface TaskDefinition {
   allowTools: boolean;
   /** Model preference hint (wake handler may override based on rate limits) */
   preferredModel?: string;
+  /**
+   * Minimum model quality floor. If rate limit downgrade would select a model
+   * below this tier, the task is deferred rather than run at degraded quality.
+   * Use this for tasks where running a weaker model is worse than not running.
+   */
+  minModel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +55,7 @@ const morningRoutine: TaskDefinition = {
     "3. Write a brief morning note to tier3/context.md with today's priorities.",
   ].join("\n"),
   allowTools: true,
+  minModel: "claude-sonnet-4-6",
 };
 
 const checkRateLimits: TaskDefinition = {
@@ -85,6 +92,7 @@ const weeklyReview: TaskDefinition = {
     "4. Write a brief weekly summary to tier3/context.md noting any cleanup performed.",
   ].join("\n"),
   allowTools: true,
+  minModel: "claude-sonnet-4-6",
 };
 
 const dailyReflection: TaskDefinition = {
@@ -116,6 +124,7 @@ const dailyReflection: TaskDefinition = {
   ].join("\n"),
   userMessage: "Good morning, Jarvis. This is your time. What do you want to do today?",
   allowTools: true,
+  minModel: "claude-sonnet-4-6",
 };
 
 // ---------------------------------------------------------------------------

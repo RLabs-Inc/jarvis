@@ -36,6 +36,14 @@ describe("getTask", () => {
     expect(task!.allowTools).toBe(true);
   });
 
+  test("returns daily_reflection task", () => {
+    const task = getTask("daily_reflection");
+    expect(task).toBeDefined();
+    expect(task!.name).toBe("daily_reflection");
+    expect(task!.allowTools).toBe(true);
+    expect(task!.minModel).toBe("claude-sonnet-4-6");
+  });
+
   test("returns undefined for unknown task", () => {
     expect(getTask("nonexistent_task")).toBeUndefined();
   });
@@ -51,7 +59,8 @@ describe("listTasks", () => {
     expect(names).toContain("morning_routine");
     expect(names).toContain("check_rate_limits");
     expect(names).toContain("weekly_review");
-    expect(names.length).toBeGreaterThanOrEqual(3);
+    expect(names).toContain("daily_reflection");
+    expect(names.length).toBeGreaterThanOrEqual(4);
   });
 });
 
@@ -102,6 +111,24 @@ describe("registerTask", () => {
     // Clean up
     BUILTIN_TASKS.delete("test_overwrite");
   });
+
+  test("registers a task with minModel", () => {
+    const task: TaskDefinition = {
+      name: "test_min_model",
+      description: "Task with minimum model requirement",
+      systemPrompt: "Test prompt",
+      userMessage: "Test message",
+      allowTools: true,
+      minModel: "claude-sonnet-4-6",
+    };
+
+    registerTask(task);
+    const retrieved = getTask("test_min_model");
+    expect(retrieved!.minModel).toBe("claude-sonnet-4-6");
+
+    // Clean up
+    BUILTIN_TASKS.delete("test_min_model");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -122,5 +149,14 @@ describe("task content quality", () => {
     const names = listTasks();
     const unique = new Set(names);
     expect(unique.size).toBe(names.length);
+  });
+
+  test("tasks with minModel have a known model", () => {
+    const knownModels = ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"];
+    for (const [, task] of BUILTIN_TASKS) {
+      if (task.minModel) {
+        expect(knownModels).toContain(task.minModel);
+      }
+    }
   });
 });

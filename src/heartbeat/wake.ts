@@ -12,8 +12,9 @@
 //   5. Adds the task's system prompt
 //   6. Runs a conversation with the task's user message
 //   7. Logs the result to mind/heartbeat/logs/
+//   8. Sends a Telegram notification to Sherlock
 //
-// This is a one-shot execution — it runs, logs, and exits.
+// This is a one-shot execution — it runs, logs, notifies, and exits.
 // It does NOT use the full Daemon class. It's a lightweight pipeline
 // that reuses the same building blocks (assembler, client, conversation).
 // ---------------------------------------------------------------------------
@@ -27,6 +28,7 @@ import { runConversation } from "../conversation.ts";
 import { getTask } from "./tasks.ts";
 import type { TaskDefinition } from "./tasks.ts";
 import { checkLimits, shouldThrottle, selectModel, meetsMinModel, recordUsage } from "./rate-limits.ts";
+import { notifyTelegram, formatWakeNotification } from "./notify.ts";
 import { mkdirSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -53,7 +55,7 @@ export interface WakeResult {
  * Execute an autonomous task triggered by cron.
  *
  * Pipeline:
- *   task lookup → rate limit check → min model check → context assembly → conversation → log
+ *   task lookup → rate limit check → min model check → context assembly → conversation → log → notify
  */
 export async function handleWake(
   taskName: string,
@@ -70,6 +72,7 @@ export async function handleWake(
       error: `Unknown task: ${taskName}`,
     });
     writeWakeLog(result);
+    await notifyResult(config, result);
     return result;
   }
 
@@ -86,6 +89,7 @@ export async function handleWake(
         response: `Deferred: utilization too high (5h: ${(limits.fiveHour * 100).toFixed(1)}%, 7d: ${(limits.sevenDay * 100).toFixed(1)}%)`,
       });
       writeWakeLog(result);
+      // Don't notify on throttle — it's routine, not interesting
       return result;
     }
 
@@ -100,6 +104,7 @@ export async function handleWake(
         response: `Deferred: would use ${model} but task requires at least ${task.minModel} (5h: ${(limits.fiveHour * 100).toFixed(1)}%, 7d: ${(limits.sevenDay * 100).toFixed(1)}%)`,
       });
       writeWakeLog(result);
+      // Don't notify on throttle — it's routine, not interesting
       return result;
     }
   } catch {
@@ -115,6 +120,7 @@ export async function handleWake(
       response,
     });
     writeWakeLog(result);
+    await notifyResult(config, result);
     return result;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -123,6 +129,7 @@ export async function handleWake(
       error: errorMsg,
     });
     writeWakeLog(result);
+    await notifyResult(config, result);
     return result;
   }
 }
@@ -173,6 +180,30 @@ async function executeTask(
     }
   }
   return text;
+}
+
+// ---------------------------------------------------------------------------
+// Notification
+// ---------------------------------------------------------------------------
+
+/**
+ * Send a Telegram notification about a wake task result.
+ * Best-effort — failures are silently ignored.
+ */
+async function notifyResult(config: JarvisConfig, result: WakeResult): Promise<void> {
+  try {
+    const message = formatWakeNotification(
+      result.task,
+      result.success,
+      result.throttled,
+      result.response,
+      result.durationMs,
+      result.error,
+    );
+    await notifyTelegram(config, message);
+  } catch {
+    // Notification is best-effort — never let it affect the task result
+  }
 }
 
 // ---------------------------------------------------------------------------
